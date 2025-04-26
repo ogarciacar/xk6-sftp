@@ -21,7 +21,7 @@ export function setup() {
 }
 
 export default function () {
-  sftp.upload(exec.vu.idInTest, localDir, filename, remoteDir); 
+  sftp.download(exec.vu.idInTest, localDir, filename, remoteDir); 
 }
 
 export function teardown() {
