@@ -42,7 +42,7 @@ Run the script:
 ```
 
 ### 3. Upload Files
-The `upload.js` script is pre-configured to download a file from the SFTP server. It uses the `sftp.upload()` function to download the file specified by `FILENAME` from `LOCAL_DIR` to `REMOTE_DIR`.
+The `upload.js` script is pre-configured to upload a file from the local host to the SFTP server. It uses the `sftp.upload()` function to upload the file specified by `FILENAME` from `LOCAL_DIR` to `REMOTE_DIR`.
 
 Run the script:
 ```shell
