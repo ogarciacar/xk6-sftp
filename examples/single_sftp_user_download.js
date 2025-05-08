@@ -1,7 +1,7 @@
 import sftp from "k6/x/sftp";
 import exec from 'k6/execution';
 
-const maxVUs = 1;
+const maxVUs = 2;
 const host = __ENV.SFTP_HOST;
 const port = __ENV.SFTP_PORT;
 const user = __ENV.SFTP_USER;
@@ -13,17 +13,17 @@ const remoteDir = __ENV.REMOTE_DIR
 
 export const options = {
   vus: maxVUs,
-  iterations: 1,
+  iterations: maxVUs,
 };
 
 export function setup() {
   sftp.connectVus(maxVUs, host, port, user, pemFile, passphrase);
 }
 
-export default function () {
-  sftp.download(exec.vu.idInTest, localDir, filename, remoteDir); 
+export default function() {
+  sftp.download(exec.vu.idInTest, remoteDir, filename, localDir);
 }
 
 export function teardown() {
-  sftp.disconnectVus()
+  sftp.disconnectVus();
 }
