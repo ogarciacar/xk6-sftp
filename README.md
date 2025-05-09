@@ -18,6 +18,39 @@ xk6 build --with github.com/ogarciacar/xk6-sftp@latest
 
 This will create a k6 binary in your current directory with the SFTP extension built-in.
 
+## Security Setup
+
+Before running any tests, you need to add your SFTP server's host key to your known_hosts file. This is required for secure connections.
+
+For standard SSH port (22):
+```bash
+# Replace with your actual SFTP server hostname or IP
+ssh-keyscan -H your-sftp-server >> ~/.ssh/known_hosts
+```
+
+For custom ports, include the port in the command:
+```bash
+# Replace with your actual SFTP server hostname/IP and port
+ssh-keyscan -p PORT -H your-sftp-server >> ~/.ssh/known_hosts
+```
+
+For example:
+```bash
+ssh-keyscan -P 2222 -H sftp.example.com >> ~/.ssh/known_hosts
+```
+
+Note: When using IP:PORT combinations, the port becomes part of the host key entry.
+For example:
+
+```bash
+ssh-keyscan -P 2222 -H 1.2.3.4 >> ~/.ssh/known_hosts
+```
+becomes the key:
+
+`[1.2.3.4]:2222` and it is treated as a different host than `sftp.example.com:22`.
+
+This step is necessary because the extension uses strict host key verification for security.
+
 ## Quick Start Guide
 
 This guide explains how to use the provided example scripts to test SFTP operations. Each script demonstrates different testing scenarios.
@@ -27,14 +60,26 @@ This guide explains how to use the provided example scripts to test SFTP operati
 Before running any script, set the following environment variables:
 
 ```bash
-export SFTP_HOST="example.com"
+export SFTP_HOST="sftp.example.com"
 export SFTP_PORT="22"
 export SFTP_USER="username"
-export SFTP_PEMFILE="/path/to/private/key.pem"
+export SFTP_PEMFILE="$PWD/path/to/private/key.pem"
 export SFTP_PASSPHRASE="your-passphrase"
-export LOCAL_DIR="/path/to/local/dir"
+export LOCAL_DIR="$PWD/path/to/local/dir"
 export FILENAME="example.txt"
 export REMOTE_DIR="/path/to/remote/dir"
+```
+
+When setting up environment variables refering to the local machine, it's important to use `$PWD` to reference the current working directory. This is required because:
+
+1. The module performs path validation to ensure files are accessed within the allowed base path
+2. The module uses `os.Getwd()` to determine the working directory and restricts file operations to that directory and its subdirectories
+3. Without `$PWD`, the paths would be resolved relative to the user's home directory, which could fail the security checks in the code
+
+Example:
+```bash
+export SFTP_PEMFILE="$PWD/path/to/private/key.pem"
+export LOCAL_DIR="$PWD/path/to/local/dir"
 ```
 
 ### Example Scripts
