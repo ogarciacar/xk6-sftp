@@ -5,11 +5,23 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/pkg/sftp"
 	"go.k6.io/k6/js/modules"
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/knownhosts"
 )
+
+// This will allow operations in the current directory and its subdirectories
+// while maintaining a secure fallback.
+var allowedBasePath = func() string {
+	wd, err := os.Getwd()
+	if err != nil {
+		return "/tmp" // fallback to /tmp if can't get working directory
+	}
+	return wd
+}()
 
 type SFTP struct {
 	connectedVUs int
@@ -71,7 +83,10 @@ type SftpVu struct {
 
 func (s *SFTP) Disconnect(key int) {
 	s.logger.Printf("VU[%05d] Disconnect", key)
-	s.clients[key].disconnect()
+	err := s.clients[key].disconnect()
+	if err != nil {
+		s.logger.Printf("VU[%05d] Disconnect error: %v", key, err)
+	}
 	delete(s.clients, key)
 }
 
@@ -104,7 +119,14 @@ func (v *SftpVu) upload(localDir string, fileName string, remoteDir string) erro
 
 	// Open the local file
 	localFilePath := filepath.Join(localDir, fileName)
-	localFile, err := os.Open(localFilePath)
+
+	safePath := filepath.Clean(localFilePath)
+
+	if !strings.HasPrefix(safePath, allowedBasePath) {
+		return fmt.Errorf("invalid path: %s", safePath)
+	}
+
+	localFile, err := os.Open(safePath)
 	if err != nil {
 		return fmt.Errorf("failed to open local file: %v", err)
 	}
@@ -147,8 +169,14 @@ func (v *SftpVu) download(remoteDir string, fileName string, localDir string) er
 	// Define the local file path
 	localFilePath := filepath.Join(localDir, fileName)
 
+	safePath := filepath.Clean(localFilePath)
+
+	if !strings.HasPrefix(safePath, allowedBasePath) {
+		return fmt.Errorf("invalid path: %s", safePath)
+	}
+
 	// Create the local file
-	localFile, err := os.Create(localFilePath)
+	localFile, err := os.Create(safePath)
 	if err != nil {
 		return fmt.Errorf("failed to create local file: %v", err)
 	}
@@ -181,11 +209,13 @@ func (s *SFTP) DisconnectVus() {
 }
 
 func config(sftpUser, pemFile, passphrase string) (*ssh.ClientConfig, error) {
-
-	//log.Printf("SFTP[0]: configuring connection for user %q\n", sftpUser)
+	safePath := filepath.Clean(pemFile)
+	if !strings.HasPrefix(safePath, allowedBasePath) {
+		return nil, fmt.Errorf("invalid path: %s", safePath)
+	}
 
 	// Read the PEM private key file
-	pemBytes, err := os.ReadFile(pemFile)
+	pemBytes, err := os.ReadFile(safePath)
 	if err != nil {
 		e := fmt.Errorf("failed to read PEM file: %v", err)
 		log.Println(e)
@@ -200,141 +230,26 @@ func config(sftpUser, pemFile, passphrase string) (*ssh.ClientConfig, error) {
 		return nil, e
 	}
 
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("could not get user home directory: %w", err)
+	}
+	knownHostsPath := filepath.Join(homeDir, ".ssh", "known_hosts")
+
+	knownHostsCallback, err := knownhosts.New(knownHostsPath)
+	if err != nil {
+		return nil, fmt.Errorf("could not create hostkeycallback: %w", err)
+	}
+
 	// Configure SSH client
 	config := &ssh.ClientConfig{
 		User: sftpUser,
 		Auth: []ssh.AuthMethod{
 			ssh.PublicKeys(privateKey),
 		},
-		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		//HostKeyCallback: ssh.InsecureIgnoreHostKey(),
+		HostKeyCallback: knownHostsCallback,
 	}
 
 	return config, nil
 }
-
-// func connect(vuIdInTest int, config *ssh.ClientConfig, host string, port string) (*ssh.Client, error) {
-
-// 	log.Printf("VU[%03d]: connecting to %q on port %q\n", vuIdInTest+1, host, port)
-
-// 	// Connect to the SSH server
-// 	conn, err := ssh.Dial("tcp", host+":"+port, config)
-// 	if err != nil {
-// 		e := fmt.Errorf("failed to dial VU[%03d]: %v", vuIdInTest+1, err)
-// 		log.Println(e)
-// 		return nil, e
-// 	}
-
-// 	// A new ssh connection
-// 	return conn, nil
-// }
-
-// func (s *SFTP) DisconnectVus() error {
-
-// 	for i := 0; i < len(s.clients); i++ {
-// 		err := s.clients[i].session.Close()
-// 		if err != nil {
-// 			e := fmt.Errorf("error closing session VU[%03d]: %v", i+1, err)
-// 			log.Println(e)
-// 			return e
-// 		}
-
-// 		err = s.clients[i].conn.Close()
-// 		if err != nil {
-// 			e := fmt.Errorf("error closing connection VU[%03d]: %v", i+1, err)
-// 			log.Println(e)
-// 			return e
-// 		}
-
-// 		log.Printf("VU[%03d]: disconnected from %q\n", i+1, s.clients[i].conn.RemoteAddr().String())
-// 	}
-
-// 	log.Printf("SFTP[2]: disconnected %d VUs\n", len(s.clients))
-
-// 	return nil
-// }
-
-// func (s *SFTP) Upload(vuIdInTest int, localDir string, fileName string, remoteDir string) error {
-
-// 	if vuIdInTest < 1 || vuIdInTest > len(s.clients) {
-// 		e := fmt.Errorf("failed to upload file %s: vuIdInTest=%d does not exist", fileName, vuIdInTest)
-// 		log.Println(e)
-// 		return e
-// 	}
-
-// 	//log.Printf("VU[%03d]: uploading file %q\n", vuIdInTest, fileName)
-
-// 	// Define the remote directory
-// 	remoteFilePath := filepath.Join(remoteDir, fileName)
-
-// 	// Open the local file
-// 	localFilePath := filepath.Join(localDir, fileName)
-// 	localFile, err := os.Open(localFilePath)
-// 	if err != nil {
-// 		e := fmt.Errorf("failed to open local file VU[%03d] %v", vuIdInTest, err)
-// 		log.Println(e)
-// 		return e
-// 	}
-// 	defer localFile.Close()
-
-// 	// Create the remote file on the SFTP server
-// 	remoteFile, err := s.clients[vuIdInTest-1].session.Create(remoteFilePath)
-// 	if err != nil {
-// 		e := fmt.Errorf("failed to create remote file VU[%03d]: %v", vuIdInTest, err)
-// 		log.Println(e)
-// 		return e
-// 	}
-// 	defer remoteFile.Close()
-
-// 	// Copy the local file to the remote file
-// 	_, err = remoteFile.ReadFrom(localFile)
-// 	if err != nil {
-// 		e := fmt.Errorf("failed to upload file VU[%03d]: %v", vuIdInTest, err)
-// 		log.Println(e)
-// 		return e
-// 	}
-
-// 	return nil
-// }
-
-// func (s *SFTP) Download(vuIdInTest int, localDir string, filename string, remoteDir string) error {
-
-// 	if vuIdInTest < 1 || vuIdInTest > len(s.clients) {
-// 		e := fmt.Errorf("vuIdInTest=%d does not exist", vuIdInTest)
-// 		log.Println(e)
-// 		return e
-// 	}
-
-// 	remoteFilePath := filepath.Join(remoteDir, filename)
-// 	log.Printf("VU[%03d]: downloading file %q\n", vuIdInTest, remoteFilePath)
-
-// 	// Open the remote file on the SFTP server
-// 	remoteFile, err := s.clients[vuIdInTest-1].session.Open(remoteFilePath)
-// 	if err != nil {
-// 		e := fmt.Errorf("failed to open remote file VU[%03d]: %v", vuIdInTest, err)
-// 		log.Println(e)
-// 		return e
-// 	}
-// 	defer remoteFile.Close()
-
-// 	// Define the local file path
-// 	localFilePath := filepath.Join(localDir, filename)
-
-// 	// Create the local file
-// 	localFile, err := os.Create(localFilePath)
-// 	if err != nil {
-// 		e := fmt.Errorf("failed to create local file VU[%03d]: %v", vuIdInTest, err)
-// 		log.Println(e)
-// 		return e
-// 	}
-// 	defer localFile.Close()
-
-// 	// Copy the remote file to the local file
-// 	_, err = localFile.ReadFrom(remoteFile)
-// 	if err != nil {
-// 		e := fmt.Errorf("failed to download file VU[%03d]: %v", vuIdInTest, err)
-// 		log.Println(e)
-// 		return e
-// 	}
-
-// 	return nil
-// }
